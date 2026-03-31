@@ -6,22 +6,22 @@ on:
   pull_request:
     branches: [ main, master ]
 
-# Предотвращаем бесконечный цикл: не запускаем workflow при коммите от бота
-env:
-  SKIP_CI: ${{ github.actor == 'github-actions[bot]' }}
+# Глобальные разрешения (безопаснее ограничить только нужным job)
+# но мы зададим permissions конкретно для job
 
 jobs:
   generate-lockfile:
     name: Generate package-lock.json
     runs-on: ubuntu-latest
-    # Запускаем только для push в main/master и только если коммит НЕ от бота
-    if: github.event_name == 'push' && contains('refs/heads/main,refs/heads/master', github.ref) && github.actor != 'github-actions[bot]'
+    # Разрешаем этому job пушить в репозиторий
+    permissions:
+      contents: write
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.actor != 'github-actions[bot]'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          # Важно: даём права на push
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js
@@ -37,7 +37,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add package-lock.json
-          # Проверяем, есть ли изменения для коммита
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
@@ -48,7 +47,8 @@ jobs:
   test:
     name: Lint & Test
     runs-on: ubuntu-latest
-    needs: generate-lockfile   # Ждём генерации lock-файла, но запускаемся даже если skip (см. условие ниже)
+    needs: generate-lockfile
+    # Даже если generate-lockfile пропущен (skipped), запускаем тесты
     if: always() && (needs.generate-lockfile.result == 'success' || needs.generate-lockfile.result == 'skipped')
 
     strategy:
