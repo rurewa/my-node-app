@@ -6,10 +6,50 @@ on:
   pull_request:
     branches: [ main, master ]
 
+# Предотвращаем бесконечный цикл: не запускаем workflow при коммите от бота
+env:
+  SKIP_CI: ${{ github.actor == 'github-actions[bot]' }}
+
 jobs:
+  generate-lockfile:
+    name: Generate package-lock.json
+    runs-on: ubuntu-latest
+    # Запускаем только для push в main/master и только если коммит НЕ от бота
+    if: github.event_name == 'push' && contains('refs/heads/main,refs/heads/master', github.ref) && github.actor != 'github-actions[bot]'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Важно: даём права на push
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Generate package-lock.json (without installing dependencies)
+        run: npm install --package-lock-only
+
+      - name: Commit and push if changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add package-lock.json
+          # Проверяем, есть ли изменения для коммита
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update package-lock.json"
+            git push
+          fi
+
   test:
     name: Lint & Test
     runs-on: ubuntu-latest
+    needs: generate-lockfile   # Ждём генерации lock-файла, но запускаемся даже если skip (см. условие ниже)
+    if: always() && (needs.generate-lockfile.result == 'success' || needs.generate-lockfile.result == 'skipped')
 
     strategy:
       matrix:
